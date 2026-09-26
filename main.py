@@ -48,10 +48,10 @@ def convertDate(frDate: str):
     date = datetime.strptime(englishDate, "%d %B %Y")
     return date.strftime("%m/%d/%Y")
 
-def createDf(fileName:str):        
+def createDf(filePath:str):        
     #construct the dataframe
     table = []
-    with pdfplumber.open(f'{fileName}.pdf') as pdf:
+    with pdfplumber.open(filePath) as pdf:
         for page in pdf.pages:
             table.extend(page.extract_table())
     
@@ -66,54 +66,63 @@ def createDf(fileName:str):
     df["First Name"] = remarque.str[0]
     df["Second Name"] = remarque.str[1]
     df.drop(columns=['Remarque'], inplace=True)
-
+    
+    # since Poly is not using the same terminology... 
+    if 'Section' in df.columns:
+        pd.DataFrame.rename(df, columns={'Section': 'Groupe'}, inplace=True)
+    
     return df
 
-def filterDf(df: pd.DataFrame, sigle:str, name:str):
+def filterDf(df: pd.DataFrame, course:str, name:str):
     #get all rows that match the sigle
-    filteredDf = df[df['Sigle'] == sigle[:-2]]
-
+    sigle, group = course.split('-')
+    filteredDf = df[(df['Sigle'] == sigle) & (df['Groupe'] == group)]
+    
     if filteredDf.shape[0] == 0:
         return None
     if filteredDf.shape[0] != 1:
+        # check if a rows contains NaN meaning all student go in the same room
+        if filteredDf['Second Name'].isnull().any():
+            # there should be only one row with NaN, if not we have a problem :)
+            filteredDf = filteredDf[filteredDf['Second Name'].isnull()]
         #find the item where name is included
-        filteredDf = filteredDf[filteredDf['Second Name'] >= name]
+        else:
+            filteredDf = filteredDf[filteredDf['Second Name'] >= name]
     
     return filteredDf
 
-#python .\main.py --name Koutou --classes CIV8185-1 --addFinals
 if __name__ == '__main__':
     #parse the input
     parser = argparse.ArgumentParser(description='PolyCsvCalendar')
     parser.add_argument('--name', type=str, required=True, help='Family name')
     parser.add_argument('--classes', nargs='+', required=True,help='sigle-group ex: MTH2304-1')
-    parser.add_argument('--addMidTerms', action='store_true',help='Do you want to add the midterms to the schedule?')
-    parser.add_argument('--addFinals', action='store_true',help='Do you want to add the finals to the schedule?')
+    parser.add_argument('--midtermsFile', type=str, default=None, help='midterm pdf file path ex: /midterms.pdf')
+    parser.add_argument('--finalsFile', type=str, default=None, help='final pdf file path ex: /finals.pdf')
 
     args = parser.parse_args()
     name = args.name
-    classes = args.classes
-    addMidterms = args.addMidTerms
-    addFinals = args.addFinals
-
+    courses = args.classes
+    midtermsFilePath = args.midtermsFile
+    finalsFilePath = args.finalsFile
+    
     midtermsDf = None
     finalsDf = None
 
-    if addMidterms:
-        midtermsDf = createDf('midterms')
-    if addFinals:
-        finalsDf = createDf('finals')
+    if midtermsFilePath is not None:
+        midtermsDf = createDf(midtermsFilePath)
+    if finalsFilePath is not None:
+        finalsDf = createDf(finalsFilePath)
     with open('calendar.csv', 'w', encoding='utf-8') as csv:
         # write the header
         csv.write('Subject, Start Date, Start Time, End Date, End Time, All Day Event, Description, Location\n')
-        for sigle in classes:
+        for course in courses:
             if midtermsDf is not None:
-                filteredDf = filterDf(midtermsDf, sigle, name)
+                filteredDf = filterDf(midtermsDf, course, name)
                 if filteredDf is not None:
-                    csv.write(f'midterm exam for {sigle[:-2]}, {convertDate(filteredDf.iloc[0,3])}, , {convertDate(filteredDf.iloc[0,3])}, , True, {random.choice(wordsOfEncouragement)}, {filteredDf.iloc[0,5]}\n')
+                    csv.write(f'midterm exam for {course[:-2]}, {convertDate(filteredDf.iloc[0,3])}, , {convertDate(filteredDf.iloc[0,3])}, , True, {random.choice(wordsOfEncouragement)}, {filteredDf.iloc[0,5]}\n')
             if finalsDf is not None:
-                filteredDf = filterDf(finalsDf, sigle, name)
+                filteredDf = filterDf(finalsDf, course, name)
                 if filteredDf is not None:
-                    csv.write(f'Final exam for {sigle[:-2]}, {convertDate(filteredDf.iloc[0,3])}, , {convertDate(filteredDf.iloc[0,3])}, , True, {random.choice(wordsOfEncouragement)}, {filteredDf.iloc[0,5]}\n')
+                    csv.write(f'Final exam for {course[:-3]}, {convertDate(filteredDf.iloc[0,3])}, , {convertDate(filteredDf.iloc[0,3])}, , True, {random.choice(wordsOfEncouragement)}, {filteredDf.iloc[0,5]}\n')
     
     print('You can find the file in the same repository where the script has been launched!')
